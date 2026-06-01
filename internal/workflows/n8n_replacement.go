@@ -253,6 +253,9 @@ func (r *Runner) createClickUpTask(ctx context.Context, name string, leadClass s
 
 	var task clickUpTask
 	if err := json.Unmarshal(responseBody, &task); err != nil {
+		if errors.Is(err, io.EOF) || strings.Contains(err.Error(), "unexpected end of JSON input") {
+			return clickUpTask{}, nil
+		}
 		return clickUpTask{}, err
 	}
 	return task, nil
