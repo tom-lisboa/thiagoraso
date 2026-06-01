@@ -345,7 +345,7 @@ func whatsappURL(phone string) any {
 	if phone == "" {
 		return nil
 	}
-	return "wa.me/" + phone
+	return "https://wa.me/" + strings.TrimPrefix(phone, "+")
 }
 
 func contestOptionID(code *int) any {
