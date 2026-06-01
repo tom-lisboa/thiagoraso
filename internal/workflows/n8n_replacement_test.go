@@ -51,8 +51,8 @@ func TestRunN8NReplacementBuildsLeadAndClickUpFields(t *testing.T) {
 	if output.ClickUpSubmitted {
 		t.Fatal("clickup should be skipped without credentials")
 	}
-	if len(output.CustomFields) != 10 {
-		t.Fatalf("expected 10 custom fields, got %d", len(output.CustomFields))
+	if len(output.CustomFields) != 11 {
+		t.Fatalf("expected 11 custom fields, got %d", len(output.CustomFields))
 	}
 }
 

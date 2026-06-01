@@ -67,7 +67,7 @@ func (r *Runner) RunN8NReplacement(ctx context.Context, input N8NReplacementInpu
 		"Para qual concurso deseja uma mentoria ?",
 		"Para qual concurso deseja uma mentoria?",
 	))
-	customFields := buildClickUpCustomFields(answers, phone, contestCode)
+	customFields := buildClickUpCustomFields(answers, phone, contestCode, leadClass)
 	name := strings.TrimSpace(answerString(answers, "Qual é o seu nome completo?"))
 	if name == "" {
 		name = "Lead"
@@ -194,11 +194,12 @@ func scoreFromText(value string, scores []textScore, fallback int) int {
 	return fallback
 }
 
-func buildClickUpCustomFields(answers map[string]any, phone string, code *int) []CustomField {
+func buildClickUpCustomFields(answers map[string]any, phone string, code *int, leadClass string) []CustomField {
 	fields := []CustomField{
 		{ID: "6bc1d844-7e9d-4640-b8c8-97a54a9aea12", Value: emptyToNil(phone)},
 		{ID: "942ba052-d74c-4304-ab97-c0e35621f39c", Value: whatsappURL(phone)},
-		{ID: "2861d5b0-9415-4d01-bfce-c79ef12a3d3f", Value: codeValue(code)},
+		{ID: "2861d5b0-9415-4d01-bfce-c79ef12a3d3f", Value: contestOptionID(code)},
+		{ID: "d42c2f67-4cc1-4c5b-b6ee-ab13c75639c0", Value: leadTemperatureOptionID(leadClass)},
 		{ID: "0d4f8ffe-adeb-404d-a47d-8e0c8f9bdc6a", Value: emptyToNil(answerString(answers, "Qual é o seu e-mail?"))},
 		{ID: "f4f0d81b-1408-4e03-a166-99fb8d7cd058", Value: emptyToNil(answerString(answers, "Qual é a sua área de graduação/curso de formação superior?"))},
 		{ID: "5b4cb720-d577-4024-b193-7ab6a0161c00", Value: mappedValue(answerString(answers, "Qual é a sua atual situação profissional?"), situationMap())},
@@ -245,6 +246,9 @@ func (r *Runner) createClickUpTask(ctx context.Context, name string, leadClass s
 	responseBody, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return clickUpTask{}, fmt.Errorf("clickup returned %s: %s", res.Status, string(responseBody))
+	}
+	if len(bytes.TrimSpace(responseBody)) == 0 {
+		return clickUpTask{}, nil
 	}
 
 	var task clickUpTask
@@ -315,7 +319,7 @@ func contestCode(value string) *int {
 	return nil
 }
 
-func mappedValue(value string, mapping map[string]int) any {
+func mappedValue(value string, mapping map[string]string) any {
 	if mapped, ok := mapping[value]; ok {
 		return mapped
 	}
@@ -344,29 +348,44 @@ func whatsappURL(phone string) any {
 	return "wa.me/" + phone
 }
 
-func codeValue(code *int) any {
+func contestOptionID(code *int) any {
 	if code == nil {
 		return nil
 	}
-	return *code
+	options := map[int]string{
+		0: "7fb2c0de-3775-44e5-ad14-d9ffbdeb6674",
+		1: "7a030cae-dc4e-4c08-b54d-bac6c1edaec8",
+		2: "1154bd08-b80e-4c39-a153-b67fbab16403",
+		3: "b1631d94-cf5d-4f5c-b372-06b356bf1532",
+	}
+	return options[*code]
 }
 
-func situationMap() map[string]int {
-	return map[string]int{"Desempregado": 0, "Sou desempregado": 0, "Estou desempregado": 0, "Estagiário": 1, "Sou estagiário": 1, "Autônomo": 2, "Sou autônomo": 2, "CLT": 3, "Sou CLT": 3, "Trabalho com carteira assinada": 3, "Servidor Publico": 4, "Servidor público": 4, "Sou servidor público": 4, "Já sou servidor público": 4, "Outro": 5, "Outros": 5, "Estudando": 6, "Estudando ": 6, "Sou estudante": 6, "Estou estudando": 6}
+func leadTemperatureOptionID(leadClass string) any {
+	options := map[string]string{
+		"0": "b57d5d57-3d76-4dfd-8574-7b3b9f811281",
+		"1": "8245a466-a965-4ec8-b0d2-d52e215ad707",
+		"2": "838626a2-6fff-4a71-bc24-aa4fa683cb5d",
+	}
+	return options[leadClass]
 }
 
-func studyTimeMap() map[string]int {
-	return map[string]int{"Ainda não comecei": 0, "Há menos de 6 meses": 1, "Entre 6 meses e 1 ano": 2, "Entre 6 meses a 1 ano": 2, "mais de 1 ano": 3, "Mais de 1 ano": 3}
+func situationMap() map[string]string {
+	return map[string]string{"Desempregado": "fdb7fb4f-1cae-4162-be24-fba8ac05db56", "Sou desempregado": "fdb7fb4f-1cae-4162-be24-fba8ac05db56", "Estou desempregado": "fdb7fb4f-1cae-4162-be24-fba8ac05db56", "Estagiário": "3b13ab2e-3fbc-4db4-b775-1efaa43c96a3", "Sou estagiário": "3b13ab2e-3fbc-4db4-b775-1efaa43c96a3", "Autônomo": "2bae7032-b8a5-4133-8713-e6e4907240e2", "Sou autônomo": "2bae7032-b8a5-4133-8713-e6e4907240e2", "CLT": "73ee0ddd-67d8-4cf9-9d51-c8038349f61f", "Sou CLT": "73ee0ddd-67d8-4cf9-9d51-c8038349f61f", "Trabalho com carteira assinada": "73ee0ddd-67d8-4cf9-9d51-c8038349f61f", "Servidor Publico": "226635e4-6e84-4652-891f-8e3d3bf80276", "Servidor público": "226635e4-6e84-4652-891f-8e3d3bf80276", "Sou servidor público": "226635e4-6e84-4652-891f-8e3d3bf80276", "Já sou servidor público": "226635e4-6e84-4652-891f-8e3d3bf80276", "Outro": "d4f76b26-7585-4334-badf-59a570f0e17a", "Outros": "d4f76b26-7585-4334-badf-59a570f0e17a"}
 }
 
-func incomeMap() map[string]int {
-	return map[string]int{"Menos de 2 mil": 0, "Menos de R$2.000,00": 0, "Entre 2 e 3k": 1, "Entre R$2.000,00 e R$3.000,00": 1, "Entre 3 e 5k": 2, "Entre R$3.000,00 e R$5.000,00": 2, "mais de 5k": 3, "Mais de R$5.000,00": 3, "Prefiro não dizer": 4}
+func studyTimeMap() map[string]string {
+	return map[string]string{"Ainda não comecei": "dfa855d5-8dec-4712-8e2e-d6fa2980c4f0", "Há menos de 6 meses": "acbd635f-9388-4a4b-8521-ce380e15c185", "Entre 6 meses e 1 ano": "7ae17340-9a51-4533-bdc1-043786967141", "Entre 6 meses a 1 ano": "7ae17340-9a51-4533-bdc1-043786967141", "mais de 1 ano": "ac9db1a8-8df8-4f71-bf28-0baff8402262", "Mais de 1 ano": "ac9db1a8-8df8-4f71-bf28-0baff8402262"}
 }
 
-func weeklyHoursMap() map[string]int {
-	return map[string]int{"Até 10 horas": 0, "Menos de 10 horas": 0, "Entre 10 e 20 horas": 0, "Entre 20 e 30 horas": 1, "Entre 40 e 60 horas": 2, "Mais de 60 horas": 3}
+func incomeMap() map[string]string {
+	return map[string]string{"Menos de 2 mil": "380a2865-0335-4432-a198-41336407563a", "Menos de R$2.000,00": "380a2865-0335-4432-a198-41336407563a", "Entre 2 e 3k": "de19fc65-d210-49ba-9eb2-273bf61200cf", "Entre R$2.000,00 e R$3.000,00": "de19fc65-d210-49ba-9eb2-273bf61200cf", "Entre 3 e 5k": "ccc48ef5-2010-4f03-9872-ede5cffcf152", "Entre R$3.000,00 e R$5.000,00": "ccc48ef5-2010-4f03-9872-ede5cffcf152", "mais de 5k": "40313ac9-0996-4116-b973-879a984b2a02", "Mais de R$5.000,00": "40313ac9-0996-4116-b973-879a984b2a02", "Prefiro não dizer": "91a17151-28bd-4cd9-b593-4bf944d9bf40"}
 }
 
-func originMap() map[string]int {
-	return map[string]int{"Aluno": 0, "Ja fui aluno(a)": 0, "Já fui aluno(a)": 0, "Instagram": 1, "Pelo Instagram": 1, "Youtube": 2, "Pelo Youtube": 2, "Indicação": 3, "Indicação de um dos mentorados": 3, "Indicação de amigos": 3, "Google": 4, "Pelo Google": 4, "TikTok": 5, "Pelo TikTok": 5}
+func weeklyHoursMap() map[string]string {
+	return map[string]string{"Até 10 horas": "b588ee97-2301-47b5-be92-1f6ab59211be", "Menos de 10 horas": "b588ee97-2301-47b5-be92-1f6ab59211be", "Entre 10 e 20 horas": "b588ee97-2301-47b5-be92-1f6ab59211be", "Entre 20 e 30 horas": "0f3474b1-0649-4244-9785-2680b24b6009", "Entre 40 e 60 horas": "a8846d23-d833-4762-863e-fbcc4f43f944", "Mais de 60 horas": "a6a89b3f-3abf-4247-b9eb-7d54901160ff"}
+}
+
+func originMap() map[string]string {
+	return map[string]string{"Aluno": "2f04fa93-f02d-458c-831f-5980f7734394", "Ja fui aluno(a)": "2f04fa93-f02d-458c-831f-5980f7734394", "Já fui aluno(a)": "2f04fa93-f02d-458c-831f-5980f7734394", "Instagram": "3d92fd0c-6cd8-43fc-b718-8b788f989c94", "Pelo Instagram": "3d92fd0c-6cd8-43fc-b718-8b788f989c94", "Youtube": "833c6577-f8d0-4850-a4a1-0e13fb955000", "Pelo Youtube": "833c6577-f8d0-4850-a4a1-0e13fb955000", "Indicação": "2922f5f4-ecae-4fd6-8d3d-a5b47d12b811", "Indicação de um dos mentorados": "2922f5f4-ecae-4fd6-8d3d-a5b47d12b811", "Indicação de amigos": "2922f5f4-ecae-4fd6-8d3d-a5b47d12b811", "Google": "60342ece-feb8-4ba0-a76f-a76ed1db5768", "Pelo Google": "60342ece-feb8-4ba0-a76f-a76ed1db5768"}
 }
