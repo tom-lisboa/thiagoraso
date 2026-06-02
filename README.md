@@ -63,6 +63,7 @@ O fluxo atual faz:
 - mapeamento do concurso alvo para codigo
 - montagem dos custom fields do ClickUp
 - criacao da task no ClickUp quando as variaveis abaixo estiverem definidas
+- envio opcional para Google Apps Script quando `GOOGLE_WEBHOOK_URL` estiver definida
 
 ## ClickUp
 
@@ -74,3 +75,13 @@ export CLICKUP_LIST_ID=...
 ```
 
 Sem essas variaveis, o servidor processa o lead e retorna o payload montado, mas nao envia nada ao ClickUp.
+
+## Google Apps Script
+
+Para enviar tambem para uma planilha/script externo, configure:
+
+```bash
+export GOOGLE_WEBHOOK_URL=...
+```
+
+O servidor envia um `POST` JSON com dados processados do lead e as respostas originais do formulario.

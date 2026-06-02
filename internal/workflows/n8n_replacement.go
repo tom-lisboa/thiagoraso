@@ -34,6 +34,7 @@ type N8NReplacementOutput struct {
 	ClickUpTaskID    string        `json:"clickup_task_id,omitempty"`
 	ClickUpTaskURL   string        `json:"clickup_task_url,omitempty"`
 	ClickUpSubmitted bool          `json:"clickup_submitted"`
+	GoogleSubmitted  bool          `json:"google_submitted"`
 	Handled          time.Time     `json:"handled_at"`
 }
 
@@ -88,16 +89,25 @@ func (r *Runner) RunN8NReplacement(ctx context.Context, input N8NReplacementInpu
 
 	if r.config.ClickUpToken == "" || r.config.ClickUpListID == "" {
 		r.logger.Info("clickup skipped: missing CLICKUP_TOKEN or CLICKUP_LIST_ID")
+	} else {
+		task, err := r.createClickUpTask(ctx, name, leadClass, customFields)
+		if err != nil {
+			return N8NReplacementOutput{}, err
+		}
+		output.ClickUpSubmitted = true
+		output.ClickUpTaskID = task.ID
+		output.ClickUpTaskURL = task.URL
+	}
+
+	if r.config.GoogleWebhookURL == "" {
+		r.logger.Info("google webhook skipped: missing GOOGLE_WEBHOOK_URL")
 		return output, nil
 	}
 
-	task, err := r.createClickUpTask(ctx, name, leadClass, customFields)
-	if err != nil {
+	if err := r.submitGoogleWebhook(ctx, output, answers); err != nil {
 		return N8NReplacementOutput{}, err
 	}
-	output.ClickUpSubmitted = true
-	output.ClickUpTaskID = task.ID
-	output.ClickUpTaskURL = task.URL
+	output.GoogleSubmitted = true
 	return output, nil
 }
 
@@ -264,6 +274,48 @@ func (r *Runner) createClickUpTask(ctx context.Context, name string, leadClass s
 type clickUpTask struct {
 	ID  string `json:"id"`
 	URL string `json:"url"`
+}
+
+func (r *Runner) submitGoogleWebhook(ctx context.Context, output N8NReplacementOutput, answers map[string]any) error {
+	payload := map[string]any{
+		"workflow":         output.Workflow,
+		"event_id":         output.EventID,
+		"status":           output.Status,
+		"lead_class":       output.LeadClass,
+		"lead_score":       output.LeadScore,
+		"name":             output.Name,
+		"phone_e164":       output.PhoneE164,
+		"contest_code":     output.ContestCode,
+		"custom_fields":    output.CustomFields,
+		"clickup_task_id":  output.ClickUpTaskID,
+		"clickup_task_url": output.ClickUpTaskURL,
+		"handled_at":       output.Handled,
+		"answers":          answers,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.config.GoogleWebhookURL, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
+	responseBody, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return fmt.Errorf("google webhook returned %s: %s", res.Status, string(responseBody))
+	}
+
+	return nil
 }
 
 func answerString(answers map[string]any, key string) string {
