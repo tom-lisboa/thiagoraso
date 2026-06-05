@@ -46,6 +46,23 @@ func (api API) runN8NReplacement(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, output)
 }
 
+func (api API) runClosedDeal(w http.ResponseWriter, r *http.Request) {
+	var input workflows.ClosedDealInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	output, err := api.runner.RunClosedDeal(r.Context(), input)
+	if err != nil {
+		api.logger.Error("workflow failed", "workflow", "closed-deal", "error", err)
+		writeError(w, http.StatusInternalServerError, "workflow failed")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, output)
+}
+
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

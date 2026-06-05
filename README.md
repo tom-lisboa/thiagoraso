@@ -47,6 +47,23 @@ curl -X POST http://localhost:8080/webhooks/n8n-replacement \
   }'
 ```
 
+### Webhook de negocio fechado
+
+Recebe eventos com `payload.id` apontando para uma task do ClickUp, busca a task original, cria uma task de onboarding e copia o e-mail para a nova task.
+
+```bash
+curl -X POST http://localhost:8080/mentoria/webhooks/negocio-fechado \
+  -H 'Content-Type: application/json' \
+  -d '{"payload":{"id":"86afkfpwd"}}'
+```
+
+Tambem existem aliases para o path original do N8N:
+
+```text
+POST /NEGOCIOFECHADO
+POST /mentoria/NEGOCIOFECHADO
+```
+
 ## Onde implementar a automacao
 
 A logica que substitui o fluxo do N8N fica em:
@@ -72,9 +89,18 @@ Configure:
 ```bash
 export CLICKUP_TOKEN=...
 export CLICKUP_LIST_ID=...
+export ONBOARDING_LIST_ID=...
 ```
 
 Sem essas variaveis, o servidor processa o lead e retorna o payload montado, mas nao envia nada ao ClickUp.
+
+`CLICKUP_LIST_ID` e usado na captacao de leads. `ONBOARDING_LIST_ID` e usado pela automacao de negocio fechado para criar a task de onboarding.
+
+Opcionalmente configure um responsavel padrao da task de onboarding:
+
+```bash
+export ONBOARDING_ASSIGNEE_ID=...
+```
 
 ## Google Apps Script
 

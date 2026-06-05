@@ -3,10 +3,12 @@ package workflows
 import "log/slog"
 
 type Config struct {
-	ClickUpToken     string
-	ClickUpListID    string
-	MetaVerifyToken  string
-	GoogleWebhookURL string
+	ClickUpToken         string
+	ClickUpListID        string
+	MetaVerifyToken      string
+	GoogleWebhookURL     string
+	OnboardingListID     string
+	OnboardingAssigneeID string
 }
 
 type Runner struct {

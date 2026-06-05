@@ -24,10 +24,12 @@ func main() {
 	}
 
 	workflowRunner := workflows.NewRunner(logger, workflows.Config{
-		ClickUpToken:     cfg.ClickUpToken,
-		ClickUpListID:    cfg.ClickUpListID,
-		MetaVerifyToken:  cfg.MetaVerifyToken,
-		GoogleWebhookURL: cfg.GoogleWebhookURL,
+		ClickUpToken:         cfg.ClickUpToken,
+		ClickUpListID:        cfg.ClickUpListID,
+		MetaVerifyToken:      cfg.MetaVerifyToken,
+		GoogleWebhookURL:     cfg.GoogleWebhookURL,
+		OnboardingListID:     cfg.OnboardingListID,
+		OnboardingAssigneeID: cfg.OnboardingAssigneeID,
 	})
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,

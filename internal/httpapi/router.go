@@ -18,9 +18,13 @@ func NewRouter(logger *slog.Logger, runner *workflows.Runner) http.Handler {
 	mux.HandleFunc("GET /healthz", api.health)
 	mux.HandleFunc("GET /webhooks/n8n-replacement", api.verifyMetaWebhook)
 	mux.HandleFunc("POST /webhooks/n8n-replacement", api.runN8NReplacement)
+	mux.HandleFunc("POST /webhooks/negocio-fechado", api.runClosedDeal)
+	mux.HandleFunc("POST /NEGOCIOFECHADO", api.runClosedDeal)
 	mux.HandleFunc("GET /mentoria/healthz", api.health)
 	mux.HandleFunc("GET /mentoria/webhooks/n8n-replacement", api.verifyMetaWebhook)
 	mux.HandleFunc("POST /mentoria/webhooks/n8n-replacement", api.runN8NReplacement)
+	mux.HandleFunc("POST /mentoria/webhooks/negocio-fechado", api.runClosedDeal)
+	mux.HandleFunc("POST /mentoria/NEGOCIOFECHADO", api.runClosedDeal)
 
 	return loggingMiddleware(logger, mux)
 }
