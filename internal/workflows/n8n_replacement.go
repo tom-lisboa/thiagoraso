@@ -35,6 +35,7 @@ type N8NReplacementOutput struct {
 	ClickUpTaskURL   string        `json:"clickup_task_url,omitempty"`
 	ClickUpSubmitted bool          `json:"clickup_submitted"`
 	GoogleSubmitted  bool          `json:"google_submitted"`
+	Deduplicated     bool          `json:"deduplicated"`
 	Handled          time.Time     `json:"handled_at"`
 }
 
@@ -63,6 +64,7 @@ func (r *Runner) RunN8NReplacement(ctx context.Context, input N8NReplacementInpu
 
 	leadClass, score := classifyLead(answers)
 	phone := normalizePhone(answerField(answers, fieldPhone))
+	email := strings.TrimSpace(answerField(answers, fieldEmail))
 	contestCode := contestCode(answerField(answers, fieldContest))
 	customFields := buildClickUpCustomFields(answers, phone, contestCode, leadClass)
 	name := strings.TrimSpace(answerField(answers, fieldName))
@@ -86,6 +88,19 @@ func (r *Runner) RunN8NReplacement(ctx context.Context, input N8NReplacementInpu
 	if r.config.ClickUpToken == "" || r.config.ClickUpListID == "" {
 		r.logger.Info("clickup skipped: missing CLICKUP_TOKEN or CLICKUP_LIST_ID")
 	} else {
+		existingTask, found, err := r.findExistingLeadTask(ctx, leadIdentity{Email: email, PhoneE164: phone})
+		if err != nil {
+			return N8NReplacementOutput{}, err
+		}
+		if found {
+			output.Status = "duplicate"
+			output.Deduplicated = true
+			output.ClickUpTaskID = existingTask.ID
+			output.ClickUpTaskURL = existingTask.URL
+			r.logger.Info("duplicate lead skipped", "task_id", existingTask.ID, "name", name)
+			return output, nil
+		}
+
 		task, err := r.createClickUpTask(ctx, name, leadClass, customFields)
 		if err != nil {
 			return N8NReplacementOutput{}, err
@@ -272,6 +287,57 @@ func (r *Runner) createClickUpTask(ctx context.Context, name string, leadClass s
 type clickUpTask struct {
 	ID  string `json:"id"`
 	URL string `json:"url"`
+}
+
+type leadIdentity struct {
+	Email     string
+	PhoneE164 string
+}
+
+type clickUpTaskListResponse struct {
+	Tasks []clickUpTaskDetails `json:"tasks"`
+}
+
+func (r *Runner) findExistingLeadTask(ctx context.Context, identity leadIdentity) (clickUpTaskDetails, bool, error) {
+	identity.Email = normalizeText(identity.Email)
+	identity.PhoneE164 = normalizePhone(identity.PhoneE164)
+
+	if identity.Email == "" && identity.PhoneE164 == "" {
+		return clickUpTaskDetails{}, false, nil
+	}
+
+	for page := 0; page < 5; page++ {
+		var response clickUpTaskListResponse
+		url := fmt.Sprintf("https://api.clickup.com/api/v2/list/%s/task?include_closed=true&page=%d", r.config.ClickUpListID, page)
+		if err := r.clickUpRequest(ctx, http.MethodGet, url, nil, &response); err != nil {
+			return clickUpTaskDetails{}, false, err
+		}
+
+		for _, task := range response.Tasks {
+			if taskMatchesLeadIdentity(task, identity) {
+				return task, true, nil
+			}
+		}
+
+		if len(response.Tasks) == 0 {
+			break
+		}
+	}
+
+	return clickUpTaskDetails{}, false, nil
+}
+
+func taskMatchesLeadIdentity(task clickUpTaskDetails, identity leadIdentity) bool {
+	taskEmail := normalizeText(stringifyAnswer(customFieldValue(task.CustomFields, emailCustomFieldID)))
+	taskPhone := normalizePhone(stringifyAnswer(customFieldValue(task.CustomFields, "6bc1d844-7e9d-4640-b8c8-97a54a9aea12")))
+
+	if identity.Email != "" && taskEmail != "" && identity.Email == taskEmail {
+		return true
+	}
+	if identity.PhoneE164 != "" && taskPhone != "" && identity.PhoneE164 == taskPhone {
+		return true
+	}
+	return false
 }
 
 func (r *Runner) submitGoogleWebhook(ctx context.Context, output N8NReplacementOutput, answers map[string]any) error {
@@ -486,6 +552,8 @@ func normalizeASCII(value string) string {
 
 func stringifyAnswer(value any) string {
 	switch typed := value.(type) {
+	case nil:
+		return ""
 	case string:
 		return typed
 	case map[string]any:

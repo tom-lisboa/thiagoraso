@@ -111,3 +111,23 @@ func TestRunN8NReplacementAcceptsNormalizedQuestionKeys(t *testing.T) {
 		t.Fatalf("expected 11 custom fields, got %d", len(output.CustomFields))
 	}
 }
+
+func TestTaskMatchesLeadIdentity(t *testing.T) {
+	task := clickUpTaskDetails{
+		ID: "task_123",
+		CustomFields: []clickUpCustomField{
+			{ID: emailCustomFieldID, Value: "Lead@Example.com"},
+			{ID: "6bc1d844-7e9d-4640-b8c8-97a54a9aea12", Value: "(65) 99999-0000"},
+		},
+	}
+
+	if !taskMatchesLeadIdentity(task, leadIdentity{Email: "lead@example.com"}) {
+		t.Fatal("expected task to match by normalized email")
+	}
+	if !taskMatchesLeadIdentity(task, leadIdentity{PhoneE164: "+5565999990000"}) {
+		t.Fatal("expected task to match by normalized phone")
+	}
+	if taskMatchesLeadIdentity(task, leadIdentity{Email: "other@example.com", PhoneE164: "+5565888880000"}) {
+		t.Fatal("did not expect task to match different identity")
+	}
+}
