@@ -62,14 +62,10 @@ func (r *Runner) RunN8NReplacement(ctx context.Context, input N8NReplacementInpu
 	}
 
 	leadClass, score := classifyLead(answers)
-	phone := normalizePhone(answerString(answers, "Qual é o seu telefone (com WhatsApp)?"))
-	contestCode := contestCode(answerStringAny(answers,
-		"Para qual concurso deseja a mentoria?",
-		"Para qual concurso deseja uma mentoria ?",
-		"Para qual concurso deseja uma mentoria?",
-	))
+	phone := normalizePhone(answerField(answers, fieldPhone))
+	contestCode := contestCode(answerField(answers, fieldContest))
 	customFields := buildClickUpCustomFields(answers, phone, contestCode, leadClass)
-	name := strings.TrimSpace(answerString(answers, "Qual é o seu nome completo?"))
+	name := strings.TrimSpace(answerField(answers, fieldName))
 	if name == "" {
 		name = "Lead"
 	}
@@ -138,33 +134,33 @@ func (r *Runner) VerifyMetaWebhook(values url.Values) (string, bool) {
 
 func classifyLead(answers map[string]any) (string, int) {
 	score := 0
-	score += scoreFromMap(answerString(answers, "Há quanto tempo estuda para concursos públicos?"), map[string]int{
+	score += scoreFromMap(answerField(answers, fieldStudyTime), map[string]int{
 		"mais de 1 ano": 20, "há mais de 1 ano": 20,
 		"entre 6 meses e 1 ano": 15, "entre 6 meses a 1 ano": 15,
 		"há menos de 6 meses": 10, "menos de 6 meses": 10,
 		"ainda não comecei": 3,
 	})
-	score += scoreFromText(answerString(answers, "Já prestou provas de concursos públicos? Quais foram seus resultados? "), []textScore{
+	score += scoreFromText(answerField(answers, fieldExamHistory), []textScore{
 		{[]string{"aprov", "cadastro reserva", "fase"}, 15},
 		{[]string{"já prestei", "prestei", "sem aprovação", "não fui aprovado"}, 10},
 		{[]string{"nunca"}, 5},
 	}, 5)
-	score += scoreFromMap(answerString(answers, "Quantas horas por semana você pode se dedicar aos estudos?"), map[string]int{
+	score += scoreFromMap(answerField(answers, fieldWeeklyHours), map[string]int{
 		"mais de 60 horas": 15, "entre 40 e 60 horas": 15,
 		"entre 20 e 30 horas": 10, "entre 10 e 20 horas": 5, "até 10 horas": 5, "menos de 10 horas": 5,
 	})
-	score += scoreFromText(answerString(answers, "O quanto você está comprometido com sua aprovação? "), []textScore{
+	score += scoreFromText(answerField(answers, fieldCommitment), []textScore{
 		{[]string{"100%", "totalmente", "muito comprometido"}, 20},
 		{[]string{"comprometido"}, 10},
 		{[]string{"avaliando", "dúvida", "duvida"}, 5},
 	}, 5)
-	score += scoreFromText(answerString(answers, "Se for selecionado, você estaria disposto e teria condições de investir na mentoria?"), []textScore{
+	score += scoreFromText(answerField(answers, fieldInvestment), []textScore{
 		{[]string{"tenho condições", "tenho condicoes", "sim"}, 15},
 		{[]string{"organizar", "parcelar"}, 10},
 		{[]string{"talvez"}, 5},
 		{[]string{"não", "nao"}, 0},
 	}, 5)
-	score += scoreFromText(answerString(answers, "Qual a sua maior necessidade em uma mentoria ?"), []textScore{
+	score += scoreFromText(answerField(answers, fieldMentorshipNeed), []textScore{
 		{[]string{"cronograma", "método", "metodo", "disciplina"}, 15},
 		{[]string{"organização", "organizacao", "direcionamento", "estratégia", "estrategia"}, 10},
 	}, 5)
@@ -186,8 +182,10 @@ type textScore struct {
 
 func scoreFromMap(value string, scores map[string]int) int {
 	normalized := normalizeText(value)
-	if score, ok := scores[normalized]; ok {
-		return score
+	for option, score := range scores {
+		if normalizeText(option) == normalized {
+			return score
+		}
 	}
 	return 0
 }
@@ -210,13 +208,13 @@ func buildClickUpCustomFields(answers map[string]any, phone string, code *int, l
 		{ID: "942ba052-d74c-4304-ab97-c0e35621f39c", Value: whatsappURL(phone)},
 		{ID: "2861d5b0-9415-4d01-bfce-c79ef12a3d3f", Value: contestOptionID(code)},
 		{ID: "d42c2f67-4cc1-4c5b-b6ee-ab13c75639c0", Value: leadTemperatureOptionID(leadClass)},
-		{ID: "0d4f8ffe-adeb-404d-a47d-8e0c8f9bdc6a", Value: emptyToNil(answerString(answers, "Qual é o seu e-mail?"))},
-		{ID: "f4f0d81b-1408-4e03-a166-99fb8d7cd058", Value: emptyToNil(answerString(answers, "Qual é a sua área de graduação/curso de formação superior?"))},
-		{ID: "5b4cb720-d577-4024-b193-7ab6a0161c00", Value: mappedValue(answerString(answers, "Qual é a sua atual situação profissional?"), situationMap())},
-		{ID: "ffd42259-7bc2-4aa2-bc36-51f7a1c2dbab", Value: mappedValue(answerString(answers, "Há quanto tempo estuda para concursos públicos?"), studyTimeMap())},
-		{ID: "38c2cfd3-f89f-44be-9d9a-6472cd5fa04e", Value: mappedValue(answerString(answers, "Qual é a sua média de renda atual?"), incomeMap())},
-		{ID: "d75bc3e5-1005-4be8-a18b-28fb4444fb4a", Value: mappedValue(answerString(answers, "Quantas horas por semana você pode se dedicar aos estudos?"), weeklyHoursMap())},
-		{ID: "6d3e3ff0-57bd-4bcb-a4f9-c2f05720985c", Value: mappedValue(answerString(answers, "Como conheceu a nossa mentoria?"), originMap())},
+		{ID: "0d4f8ffe-adeb-404d-a47d-8e0c8f9bdc6a", Value: emptyToNil(answerField(answers, fieldEmail))},
+		{ID: "f4f0d81b-1408-4e03-a166-99fb8d7cd058", Value: emptyToNil(answerField(answers, fieldEducationArea))},
+		{ID: "5b4cb720-d577-4024-b193-7ab6a0161c00", Value: mappedValue(answerField(answers, fieldProfessionalStatus), situationMap())},
+		{ID: "ffd42259-7bc2-4aa2-bc36-51f7a1c2dbab", Value: mappedValue(answerField(answers, fieldStudyTime), studyTimeMap())},
+		{ID: "38c2cfd3-f89f-44be-9d9a-6472cd5fa04e", Value: mappedValue(answerField(answers, fieldIncome), incomeMap())},
+		{ID: "d75bc3e5-1005-4be8-a18b-28fb4444fb4a", Value: mappedValue(answerField(answers, fieldWeeklyHours), weeklyHoursMap())},
+		{ID: "6d3e3ff0-57bd-4bcb-a4f9-c2f05720985c", Value: mappedValue(answerField(answers, fieldOrigin), originMap())},
 	}
 
 	customFields := make([]CustomField, 0, len(fields))
@@ -318,8 +316,129 @@ func (r *Runner) submitGoogleWebhook(ctx context.Context, output N8NReplacementO
 	return nil
 }
 
-func answerString(answers map[string]any, key string) string {
-	return answerStringAny(answers, key)
+type answerFieldName string
+
+const (
+	fieldName               answerFieldName = "name"
+	fieldPhone              answerFieldName = "phone"
+	fieldContest            answerFieldName = "contest"
+	fieldEmail              answerFieldName = "email"
+	fieldEducationArea      answerFieldName = "education_area"
+	fieldProfessionalStatus answerFieldName = "professional_status"
+	fieldStudyTime          answerFieldName = "study_time"
+	fieldExamHistory        answerFieldName = "exam_history"
+	fieldWeeklyHours        answerFieldName = "weekly_hours"
+	fieldMentorshipNeed     answerFieldName = "mentorship_need"
+	fieldCommitment         answerFieldName = "commitment"
+	fieldIncome             answerFieldName = "income"
+	fieldInvestment         answerFieldName = "investment"
+	fieldOrigin             answerFieldName = "origin"
+)
+
+var answerFieldAliases = map[answerFieldName][]string{
+	fieldName: {
+		"Qual é o seu nome completo?",
+		"Qual e o seu nome completo?",
+		"Nome completo",
+		"Nome",
+	},
+	fieldPhone: {
+		"Qual é o seu telefone (com WhatsApp)?",
+		"Qual é o seu telefone com WhatsApp?",
+		"Qual e o seu telefone com WhatsApp?",
+		"Telefone",
+		"WhatsApp",
+		"Telefone (com WhatsApp)",
+	},
+	fieldContest: {
+		"Para qual concurso deseja a mentoria?",
+		"Para qual concurso deseja uma mentoria ?",
+		"Para qual concurso deseja uma mentoria?",
+		"Concurso desejado",
+		"Concurso alvo",
+	},
+	fieldEmail: {
+		"Qual é o seu e-mail?",
+		"Qual é o seu email?",
+		"Qual e o seu e-mail?",
+		"Qual e o seu email?",
+		"E-mail",
+		"Email",
+	},
+	fieldEducationArea: {
+		"Qual é a sua área de graduação/curso de formação superior?",
+		"Qual e a sua area de graduacao/curso de formacao superior?",
+		"Área de graduação",
+		"Area de graduacao",
+		"Curso de formação superior",
+		"Curso de formacao superior",
+	},
+	fieldProfessionalStatus: {
+		"Qual é a sua atual situação profissional?",
+		"Qual e a sua atual situacao profissional?",
+		"Situação profissional",
+		"Situacao profissional",
+	},
+	fieldStudyTime: {
+		"Há quanto tempo estuda para concursos públicos?",
+		"Há quanto tempo estuda para concursos públicos ?",
+		"Ha quanto tempo estuda para concursos publicos?",
+		"Tempo de estudo",
+		"Tempo de preparação",
+		"Tempo de preparacao",
+	},
+	fieldExamHistory: {
+		"Já prestou provas de concursos públicos? Quais foram seus resultados? ",
+		"Já prestou provas de concursos públicos? Quais foram seus resultados?",
+		"Ja prestou provas de concursos publicos? Quais foram seus resultados?",
+		"Histórico de provas",
+		"Historico de provas",
+	},
+	fieldWeeklyHours: {
+		"Quantas horas por semana você pode se dedicar aos estudos?",
+		"Quantas horas por semana voce pode se dedicar aos estudos?",
+		"Horas disponíveis por semana",
+		"Horas disponiveis por semana",
+		"Quantidade de horas",
+	},
+	fieldMentorshipNeed: {
+		"Qual a sua maior necessidade em uma mentoria ?",
+		"Qual a sua maior necessidade em uma mentoria?",
+		"Qual é a sua maior necessidade em uma mentoria?",
+		"Qual e a sua maior necessidade em uma mentoria?",
+		"Maior necessidade na mentoria",
+	},
+	fieldCommitment: {
+		"O quanto você está comprometido com sua aprovação? ",
+		"O quanto você está comprometido com sua aprovação?",
+		"O quanto voce esta comprometido com sua aprovacao?",
+		"Comprometimento",
+	},
+	fieldIncome: {
+		"Qual é a sua média de renda atual?",
+		"Qual é a sua média de renda atual ?",
+		"Qual a sua média de renda atual ?",
+		"Qual e a sua media de renda atual?",
+		"Renda atual",
+		"Renda Mensal",
+	},
+	fieldInvestment: {
+		"Se for selecionado, você estaria disposto e teria condições de investir na mentoria?",
+		"Se for selecionado, voce estaria disposto e teria condicoes de investir na mentoria?",
+		"Disposição para investir",
+		"Disposicao para investir",
+	},
+	fieldOrigin: {
+		"Como conheceu a nossa mentoria?",
+		"Como você conheceu a nossa mentoria?",
+		"Como voce conheceu a nossa mentoria?",
+		"Origem do Lead",
+		"Origem",
+	},
+}
+
+func answerField(answers map[string]any, field answerFieldName) string {
+	return answerStringAny(answers, answerFieldAliases[field]...)
 }
 
 func answerStringAny(answers map[string]any, keys ...string) string {
@@ -328,7 +447,41 @@ func answerStringAny(answers map[string]any, keys ...string) string {
 			return stringifyAnswer(value)
 		}
 	}
+
+	aliases := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		aliases[normalizeAnswerKey(key)] = struct{}{}
+	}
+	for key, value := range answers {
+		if _, ok := aliases[normalizeAnswerKey(key)]; ok {
+			return stringifyAnswer(value)
+		}
+	}
 	return ""
+}
+
+var answerKeyNoise = regexp.MustCompile(`[^a-z0-9]+`)
+
+func normalizeAnswerKey(value string) string {
+	value = normalizeASCII(value)
+	value = answerKeyNoise.ReplaceAllString(value, " ")
+	return strings.Join(strings.Fields(value), " ")
+}
+
+func normalizeASCII(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	replacements := map[string]string{
+		"á": "a", "à": "a", "â": "a", "ã": "a", "ä": "a",
+		"é": "e", "è": "e", "ê": "e", "ë": "e",
+		"í": "i", "ì": "i", "î": "i", "ï": "i",
+		"ó": "o", "ò": "o", "ô": "o", "õ": "o", "ö": "o",
+		"ú": "u", "ù": "u", "û": "u", "ü": "u",
+		"ç": "c",
+	}
+	for from, to := range replacements {
+		value = strings.ReplaceAll(value, from, to)
+	}
+	return value
 }
 
 func stringifyAnswer(value any) string {
@@ -368,8 +521,11 @@ func contestCode(value string) *int {
 		"MPT":                              2,
 		"Magistratura do Trabalho":         3,
 	}
-	if code, ok := codes[value]; ok {
-		return &code
+	normalized := normalizeText(value)
+	for option, code := range codes {
+		if normalizeText(option) == normalized {
+			return &code
+		}
 	}
 	return nil
 }
@@ -378,14 +534,17 @@ func mappedValue(value string, mapping map[string]string) any {
 	if mapped, ok := mapping[value]; ok {
 		return mapped
 	}
-	if mapped, ok := mapping[normalizeText(value)]; ok {
-		return mapped
+	normalized := normalizeText(value)
+	for option, mapped := range mapping {
+		if normalizeText(option) == normalized {
+			return mapped
+		}
 	}
 	return nil
 }
 
 func normalizeText(value string) string {
-	return strings.ToLower(strings.TrimSpace(value))
+	return normalizeASCII(value)
 }
 
 func emptyToNil(value string) any {

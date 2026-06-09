@@ -69,3 +69,45 @@ func TestNormalizePhone(t *testing.T) {
 		}
 	}
 }
+
+func TestRunN8NReplacementAcceptsNormalizedQuestionKeys(t *testing.T) {
+	runner := NewRunner(slog.Default(), Config{})
+
+	output, err := runner.RunN8NReplacement(context.Background(), N8NReplacementInput{
+		Answers: map[string]any{
+			"Nome completo":                 "Joao Teste",
+			"Telefone com WhatsApp":         "65 99999-0000",
+			"Concurso alvo":                 "mpt",
+			"Email":                         "joao@example.com",
+			"Area de graduacao":             "Direito",
+			"Situacao profissional":         "clt",
+			"Tempo de estudo":               "mais de 1 ano",
+			"Historico de provas":           "prestei sem aprovação",
+			"Horas disponiveis por semana":  "entre 40 e 60 horas",
+			"Maior necessidade na mentoria": "metodo e disciplina",
+			"Comprometimento":               "100% comprometido",
+			"Renda atual":                   "entre 3 e 5k",
+			"Disposicao para investir":      "sim, tenho condicoes",
+			"Origem":                        "instagram",
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunN8NReplacement returned error: %v", err)
+	}
+
+	if output.Name != "Joao Teste" {
+		t.Fatalf("unexpected name: %q", output.Name)
+	}
+	if output.PhoneE164 != "+5565999990000" {
+		t.Fatalf("unexpected phone: %q", output.PhoneE164)
+	}
+	if output.ContestCode == nil || *output.ContestCode != 2 {
+		t.Fatalf("unexpected contest code: %#v", output.ContestCode)
+	}
+	if output.LeadClass != "0" {
+		t.Fatalf("expected lead class 0, got %q with score %d", output.LeadClass, output.LeadScore)
+	}
+	if len(output.CustomFields) != 11 {
+		t.Fatalf("expected 11 custom fields, got %d", len(output.CustomFields))
+	}
+}
