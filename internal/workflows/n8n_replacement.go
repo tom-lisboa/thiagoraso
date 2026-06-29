@@ -266,7 +266,7 @@ func (r *Runner) createClickUpTask(ctx context.Context, name string, leadClass s
 	}
 	defer res.Body.Close()
 
-	responseBody, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
+	responseBody, _ := io.ReadAll(res.Body)
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return clickUpTask{}, fmt.Errorf("clickup returned %s: %s", res.Status, string(responseBody))
 	}
