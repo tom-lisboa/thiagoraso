@@ -173,7 +173,7 @@ func (r *Runner) clickUpRequest(ctx context.Context, method string, url string, 
 	}
 	defer res.Body.Close()
 
-	responseBody, _ := io.ReadAll(io.LimitReader(res.Body, 8192))
+	responseBody, _ := io.ReadAll(res.Body)
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return fmt.Errorf("clickup returned %s: %s", res.Status, string(responseBody))
 	}
