@@ -18,11 +18,15 @@ func NewRouter(logger *slog.Logger, runner *workflows.Runner, eventStore storage
 	}
 
 	mux.HandleFunc("GET /healthz", api.health)
+	mux.HandleFunc("GET /dashboard", api.dashboard)
+	mux.HandleFunc("GET /api/metrics", api.metrics)
 	mux.HandleFunc("GET /webhooks/n8n-replacement", api.verifyMetaWebhook)
 	mux.HandleFunc("POST /webhooks/n8n-replacement", api.runN8NReplacement)
 	mux.HandleFunc("POST /webhooks/negocio-fechado", api.runClosedDeal)
 	mux.HandleFunc("POST /NEGOCIOFECHADO", api.runClosedDeal)
 	mux.HandleFunc("GET /mentoria/healthz", api.health)
+	mux.HandleFunc("GET /mentoria/dashboard", api.dashboard)
+	mux.HandleFunc("GET /mentoria/api/metrics", api.metrics)
 	mux.HandleFunc("GET /mentoria/webhooks/n8n-replacement", api.verifyMetaWebhook)
 	mux.HandleFunc("POST /mentoria/webhooks/n8n-replacement", api.runN8NReplacement)
 	mux.HandleFunc("POST /mentoria/webhooks/negocio-fechado", api.runClosedDeal)

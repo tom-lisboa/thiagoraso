@@ -27,6 +27,10 @@ func (s *fakeEventStore) MarkFinished(_ context.Context, _ int64, result storage
 	return nil
 }
 
+func (s *fakeEventStore) DashboardMetrics(_ context.Context) (storage.DashboardMetrics, error) {
+	return storage.DashboardMetrics{}, nil
+}
+
 func (s *fakeEventStore) Close() error {
 	return nil
 }

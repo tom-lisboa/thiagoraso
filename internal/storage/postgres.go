@@ -14,6 +14,7 @@ import (
 type Store interface {
 	RecordInbound(ctx context.Context, event InboundEvent) (int64, error)
 	MarkFinished(ctx context.Context, id int64, result EventResult) error
+	DashboardMetrics(ctx context.Context) (DashboardMetrics, error)
 	Close() error
 }
 
@@ -32,6 +33,42 @@ type EventResult struct {
 	HTTPStatus   int
 	ResponseBody any
 	ErrorMessage string
+}
+
+type DashboardMetrics struct {
+	GeneratedAt    time.Time             `json:"generated_at"`
+	TotalEvents    int64                 `json:"total_events"`
+	EventsToday    int64                 `json:"events_today"`
+	EventsLast24h  int64                 `json:"events_last_24h"`
+	Successful     int64                 `json:"successful"`
+	Failed         int64                 `json:"failed"`
+	InvalidJSON    int64                 `json:"invalid_json"`
+	SuccessRate    float64               `json:"success_rate"`
+	StatusCounts   []MetricCount         `json:"status_counts"`
+	WorkflowCounts []MetricCount         `json:"workflow_counts"`
+	HourlyEvents   []HourlyMetric        `json:"hourly_events"`
+	RecentEvents   []WebhookEventSummary `json:"recent_events"`
+}
+
+type MetricCount struct {
+	Name  string `json:"name"`
+	Count int64  `json:"count"`
+}
+
+type HourlyMetric struct {
+	Hour  time.Time `json:"hour"`
+	Count int64     `json:"count"`
+}
+
+type WebhookEventSummary struct {
+	ID           int64     `json:"id"`
+	Workflow     string    `json:"workflow"`
+	Status       string    `json:"status"`
+	HTTPStatus   int       `json:"http_status,omitempty"`
+	Path         string    `json:"path"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	ErrorMessage string    `json:"error_message,omitempty"`
 }
 
 type PostgresStore struct {
@@ -124,6 +161,144 @@ SET status = $2,
 WHERE id = $1
 `, id, result.Status, result.HTTPStatus, responseBody, emptyStringToNil(result.ErrorMessage), time.Now().UTC())
 	return err
+}
+
+func (s *PostgresStore) DashboardMetrics(ctx context.Context) (DashboardMetrics, error) {
+	metrics := DashboardMetrics{GeneratedAt: time.Now().UTC()}
+
+	err := s.db.QueryRowContext(ctx, `
+SELECT
+	count(*),
+	count(*) FILTER (WHERE created_at::date = current_date),
+	count(*) FILTER (WHERE created_at >= now() - interval '24 hours'),
+	count(*) FILTER (WHERE status IN ('processed', 'duplicate')),
+	count(*) FILTER (WHERE status = 'failed'),
+	count(*) FILTER (WHERE status = 'invalid_json')
+FROM webhook_events
+`).Scan(
+		&metrics.TotalEvents,
+		&metrics.EventsToday,
+		&metrics.EventsLast24h,
+		&metrics.Successful,
+		&metrics.Failed,
+		&metrics.InvalidJSON,
+	)
+	if err != nil {
+		return DashboardMetrics{}, err
+	}
+	if metrics.TotalEvents > 0 {
+		metrics.SuccessRate = float64(metrics.Successful) / float64(metrics.TotalEvents)
+	}
+
+	statusCounts, err := s.metricCounts(ctx, `
+SELECT status, count(*)
+FROM webhook_events
+GROUP BY status
+ORDER BY count(*) DESC, status ASC
+`)
+	if err != nil {
+		return DashboardMetrics{}, err
+	}
+	metrics.StatusCounts = statusCounts
+
+	workflowCounts, err := s.metricCounts(ctx, `
+SELECT workflow, count(*)
+FROM webhook_events
+GROUP BY workflow
+ORDER BY count(*) DESC, workflow ASC
+`)
+	if err != nil {
+		return DashboardMetrics{}, err
+	}
+	metrics.WorkflowCounts = workflowCounts
+
+	hourlyEvents, err := s.hourlyMetrics(ctx)
+	if err != nil {
+		return DashboardMetrics{}, err
+	}
+	metrics.HourlyEvents = hourlyEvents
+
+	recentEvents, err := s.recentEvents(ctx)
+	if err != nil {
+		return DashboardMetrics{}, err
+	}
+	metrics.RecentEvents = recentEvents
+
+	return metrics, nil
+}
+
+func (s *PostgresStore) metricCounts(ctx context.Context, query string) ([]MetricCount, error) {
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var counts []MetricCount
+	for rows.Next() {
+		var item MetricCount
+		if err := rows.Scan(&item.Name, &item.Count); err != nil {
+			return nil, err
+		}
+		counts = append(counts, item)
+	}
+	return counts, rows.Err()
+}
+
+func (s *PostgresStore) hourlyMetrics(ctx context.Context) ([]HourlyMetric, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT date_trunc('hour', created_at) AS hour, count(*)
+FROM webhook_events
+WHERE created_at >= now() - interval '24 hours'
+GROUP BY hour
+ORDER BY hour ASC
+`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var metrics []HourlyMetric
+	for rows.Next() {
+		var item HourlyMetric
+		if err := rows.Scan(&item.Hour, &item.Count); err != nil {
+			return nil, err
+		}
+		metrics = append(metrics, item)
+	}
+	return metrics, rows.Err()
+}
+
+func (s *PostgresStore) recentEvents(ctx context.Context) ([]WebhookEventSummary, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, workflow, status, coalesce(http_status, 0), path, created_at, updated_at, coalesce(error_message, '')
+FROM webhook_events
+ORDER BY id DESC
+LIMIT 25
+`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []WebhookEventSummary
+	for rows.Next() {
+		var event WebhookEventSummary
+		if err := rows.Scan(
+			&event.ID,
+			&event.Workflow,
+			&event.Status,
+			&event.HTTPStatus,
+			&event.Path,
+			&event.CreatedAt,
+			&event.UpdatedAt,
+			&event.ErrorMessage,
+		); err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	return events, rows.Err()
 }
 
 func emptyStringToNil(value string) any {
