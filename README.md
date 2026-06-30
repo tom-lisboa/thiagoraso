@@ -111,3 +111,70 @@ export GOOGLE_WEBHOOK_URL=...
 ```
 
 O servidor envia um `POST` JSON com dados processados do lead e as respostas originais do formulario.
+
+## Backup dos webhooks em Postgres
+
+Para guardar todo payload recebido antes de chamar ClickUp/Google, configure:
+
+```bash
+export DATABASE_URL='postgres://mentoria:SENHA_FORTE@localhost:5432/mentoria?sslmode=disable'
+```
+
+Quando `DATABASE_URL` estiver configurada, o servidor cria automaticamente a tabela `webhook_events` e grava:
+
+- workflow chamado
+- path, metodo, headers e query string
+- body bruto recebido
+- status final (`processed`, `duplicate`, `failed` ou `invalid_json`)
+- resposta ou erro do processamento
+
+Exemplo local com Docker:
+
+```bash
+docker run -d \
+  --name mentoria-postgres \
+  --restart unless-stopped \
+  -e POSTGRES_DB=mentoria \
+  -e POSTGRES_USER=mentoria \
+  -e POSTGRES_PASSWORD='SENHA_FORTE' \
+  -v mentoria-postgres-data:/var/lib/postgresql/data \
+  -p 5432:5432 \
+  postgres:17-alpine
+```
+
+Na VPS, prefira deixar o Postgres sem porta publica e conectar os containers pela mesma rede Docker:
+
+```bash
+docker network create mentoria-net 2>/dev/null || true
+
+docker run -d \
+  --name mentoria-postgres \
+  --restart unless-stopped \
+  --network mentoria-net \
+  -e POSTGRES_DB=mentoria \
+  -e POSTGRES_USER=mentoria \
+  -e POSTGRES_PASSWORD='SENHA_FORTE' \
+  -v mentoria-postgres-data:/var/lib/postgresql/data \
+  postgres:17-alpine
+```
+
+Depois rode o container da API na mesma rede com:
+
+```bash
+-e DATABASE_URL='postgres://mentoria:SENHA_FORTE@mentoria-postgres:5432/mentoria?sslmode=disable'
+--network mentoria-net
+```
+
+Para auditar eventos recentes:
+
+```bash
+docker exec -it mentoria-postgres psql -U mentoria -d mentoria \
+  -c "select id, workflow, status, http_status, created_at, error_message from webhook_events order by id desc limit 20;"
+```
+
+Para localizar payloads que chegaram mas falharam no processamento:
+
+```bash
+docker exec -it mentoria-postgres psql -U mentoria -d mentoria \
+  -c "select id, workflow, raw_body from webhook_events where status = 'failed' order by id desc;"
+```

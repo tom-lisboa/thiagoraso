@@ -11,6 +11,7 @@ import (
 
 	"mentoria-automation-server/internal/config"
 	"mentoria-automation-server/internal/httpapi"
+	"mentoria-automation-server/internal/storage"
 	"mentoria-automation-server/internal/workflows"
 )
 
@@ -31,9 +32,28 @@ func main() {
 		OnboardingListID:     cfg.OnboardingListID,
 		OnboardingAssigneeID: cfg.OnboardingAssigneeID,
 	})
+
+	var eventStore storage.Store
+	if cfg.DatabaseURL != "" {
+		storeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		store, err := storage.OpenPostgres(storeCtx, cfg.DatabaseURL)
+		cancel()
+		if err != nil {
+			logger.Error("failed to connect postgres", "error", err)
+			os.Exit(1)
+		}
+		defer func() {
+			if err := store.Close(); err != nil {
+				logger.Error("failed to close postgres", "error", err)
+			}
+		}()
+		eventStore = store
+		logger.Info("postgres event store enabled")
+	}
+
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewRouter(logger, workflowRunner),
+		Handler:           httpapi.NewRouter(logger, workflowRunner, eventStore),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

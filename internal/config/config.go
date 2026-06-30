@@ -10,6 +10,7 @@ type Config struct {
 	GoogleWebhookURL     string
 	OnboardingListID     string
 	OnboardingAssigneeID string
+	DatabaseURL          string
 }
 
 func Load() (Config, error) {
@@ -26,5 +27,6 @@ func Load() (Config, error) {
 		GoogleWebhookURL:     os.Getenv("GOOGLE_WEBHOOK_URL"),
 		OnboardingListID:     os.Getenv("ONBOARDING_LIST_ID"),
 		OnboardingAssigneeID: os.Getenv("ONBOARDING_ASSIGNEE_ID"),
+		DatabaseURL:          os.Getenv("DATABASE_URL"),
 	}, nil
 }

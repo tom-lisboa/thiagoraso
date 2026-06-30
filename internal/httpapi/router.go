@@ -4,15 +4,17 @@ import (
 	"log/slog"
 	"net/http"
 
+	"mentoria-automation-server/internal/storage"
 	"mentoria-automation-server/internal/workflows"
 )
 
-func NewRouter(logger *slog.Logger, runner *workflows.Runner) http.Handler {
+func NewRouter(logger *slog.Logger, runner *workflows.Runner, eventStore storage.Store) http.Handler {
 	mux := http.NewServeMux()
 
 	api := API{
-		logger: logger,
-		runner: runner,
+		logger:     logger,
+		runner:     runner,
+		eventStore: eventStore,
 	}
 
 	mux.HandleFunc("GET /healthz", api.health)
