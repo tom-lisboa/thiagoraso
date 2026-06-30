@@ -14,6 +14,8 @@ import (
 
 const emailCustomFieldID = "0d4f8ffe-adeb-404d-a47d-8e0c8f9bdc6a"
 
+var clickUpHTTPClient = &http.Client{Timeout: 45 * time.Second}
+
 type ClosedDealInput struct {
 	Body    closedDealBody    `json:"body"`
 	Payload closedDealPayload `json:"payload"`
@@ -149,42 +151,84 @@ func customFieldValue(fields []clickUpCustomField, fieldID string) any {
 }
 
 func (r *Runner) clickUpRequest(ctx context.Context, method string, url string, payload any, output any) error {
-	var body io.Reader
+	var encoded []byte
 	if payload != nil {
-		encoded, err := json.Marshal(payload)
+		var err error
+		encoded, err = json.Marshal(payload)
 		if err != nil {
 			return err
 		}
-		body = bytes.NewReader(encoded)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, url, body)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", r.config.ClickUpToken)
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		var body io.Reader
+		if encoded != nil {
+			body = bytes.NewReader(encoded)
+		}
 
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
+		req, err := http.NewRequestWithContext(ctx, method, url, body)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", r.config.ClickUpToken)
+		if payload != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
 
-	responseBody, _ := io.ReadAll(res.Body)
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return fmt.Errorf("clickup returned %s: %s", res.Status, string(responseBody))
-	}
-	if output == nil || len(bytes.TrimSpace(responseBody)) == 0 {
-		return nil
-	}
-	if err := json.Unmarshal(responseBody, output); err != nil {
-		if errors.Is(err, io.EOF) || strings.Contains(err.Error(), "unexpected end of JSON input") {
+		res, err := clickUpHTTPClient.Do(req)
+		if err != nil {
+			lastErr = err
+			if ctx.Err() != nil || attempt == 3 {
+				return err
+			}
+			r.logger.Warn("retrying clickup request", "method", method, "attempt", attempt, "error", err)
+			if err := waitBeforeClickUpRetry(ctx, attempt); err != nil {
+				return err
+			}
+			continue
+		}
+
+		responseBody, _ := io.ReadAll(res.Body)
+		_ = res.Body.Close()
+		if res.StatusCode < 200 || res.StatusCode >= 300 {
+			lastErr = fmt.Errorf("clickup returned %s: %s", res.Status, string(responseBody))
+			if !retryableClickUpStatus(res.StatusCode) || attempt == 3 {
+				return lastErr
+			}
+			r.logger.Warn("retrying clickup request", "method", method, "attempt", attempt, "status", res.Status)
+			if err := waitBeforeClickUpRetry(ctx, attempt); err != nil {
+				return err
+			}
+			continue
+		}
+		if output == nil || len(bytes.TrimSpace(responseBody)) == 0 {
 			return nil
 		}
-		return err
+		if err := json.Unmarshal(responseBody, output); err != nil {
+			if errors.Is(err, io.EOF) || strings.Contains(err.Error(), "unexpected end of JSON input") {
+				return nil
+			}
+			return err
+		}
+		return nil
 	}
-	return nil
+
+	return lastErr
+}
+
+func retryableClickUpStatus(statusCode int) bool {
+	return statusCode == http.StatusTooManyRequests || statusCode >= 500
+}
+
+func waitBeforeClickUpRetry(ctx context.Context, attempt int) error {
+	timer := time.NewTimer(time.Duration(attempt) * time.Second)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

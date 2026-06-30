@@ -248,37 +248,8 @@ func (r *Runner) createClickUpTask(ctx context.Context, name string, leadClass s
 		"custom_fields": customFields,
 	}
 
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return clickUpTask{}, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.clickup.com/api/v2/list/"+r.config.ClickUpListID+"/task", bytes.NewReader(body))
-	if err != nil {
-		return clickUpTask{}, err
-	}
-	req.Header.Set("Authorization", r.config.ClickUpToken)
-	req.Header.Set("Content-Type", "application/json")
-
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return clickUpTask{}, err
-	}
-	defer res.Body.Close()
-
-	responseBody, _ := io.ReadAll(res.Body)
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return clickUpTask{}, fmt.Errorf("clickup returned %s: %s", res.Status, string(responseBody))
-	}
-	if len(bytes.TrimSpace(responseBody)) == 0 {
-		return clickUpTask{}, nil
-	}
-
 	var task clickUpTask
-	if err := json.Unmarshal(responseBody, &task); err != nil {
-		if errors.Is(err, io.EOF) || strings.Contains(err.Error(), "unexpected end of JSON input") {
-			return clickUpTask{}, nil
-		}
+	if err := r.clickUpRequest(ctx, http.MethodPost, "https://api.clickup.com/api/v2/list/"+r.config.ClickUpListID+"/task", payload, &task); err != nil {
 		return clickUpTask{}, err
 	}
 	return task, nil
