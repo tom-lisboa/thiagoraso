@@ -13,8 +13,9 @@ import (
 )
 
 type fakeEventStore struct {
-	event  storage.InboundEvent
-	result storage.EventResult
+	event        storage.InboundEvent
+	result       storage.EventResult
+	metricPeriod storage.DashboardPeriod
 }
 
 func (s *fakeEventStore) RecordInbound(_ context.Context, event storage.InboundEvent) (int64, error) {
@@ -27,12 +28,31 @@ func (s *fakeEventStore) MarkFinished(_ context.Context, _ int64, result storage
 	return nil
 }
 
-func (s *fakeEventStore) DashboardMetrics(_ context.Context) (storage.DashboardMetrics, error) {
-	return storage.DashboardMetrics{}, nil
+func (s *fakeEventStore) DashboardMetrics(_ context.Context, period storage.DashboardPeriod) (storage.DashboardMetrics, error) {
+	s.metricPeriod = period
+	return storage.DashboardMetrics{Period: period.Key, PeriodLabel: period.Label}, nil
 }
 
 func (s *fakeEventStore) Close() error {
 	return nil
+}
+
+func TestMetricsUsesRequestedPeriod(t *testing.T) {
+	store := &fakeEventStore{}
+	runner := workflows.NewRunner(slog.Default(), workflows.Config{})
+	handler := NewRouter(slog.Default(), runner, store)
+
+	req := httptest.NewRequest(http.MethodGet, "/mentoria/api/metrics?period=7d", nil)
+	res := httptest.NewRecorder()
+
+	handler.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, res.Code)
+	}
+	if store.metricPeriod.Key != "7d" {
+		t.Fatalf("unexpected metric period: %q", store.metricPeriod.Key)
+	}
 }
 
 func TestRunN8NReplacementPersistsInvalidJSON(t *testing.T) {

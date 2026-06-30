@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -14,7 +15,7 @@ import (
 type Store interface {
 	RecordInbound(ctx context.Context, event InboundEvent) (int64, error)
 	MarkFinished(ctx context.Context, id int64, result EventResult) error
-	DashboardMetrics(ctx context.Context) (DashboardMetrics, error)
+	DashboardMetrics(ctx context.Context, period DashboardPeriod) (DashboardMetrics, error)
 	Close() error
 }
 
@@ -37,6 +38,8 @@ type EventResult struct {
 
 type DashboardMetrics struct {
 	GeneratedAt    time.Time             `json:"generated_at"`
+	Period         string                `json:"period"`
+	PeriodLabel    string                `json:"period_label"`
 	TotalEvents    int64                 `json:"total_events"`
 	EventsToday    int64                 `json:"events_today"`
 	EventsLast24h  int64                 `json:"events_last_24h"`
@@ -48,6 +51,11 @@ type DashboardMetrics struct {
 	WorkflowCounts []MetricCount         `json:"workflow_counts"`
 	HourlyEvents   []HourlyMetric        `json:"hourly_events"`
 	RecentEvents   []WebhookEventSummary `json:"recent_events"`
+}
+
+type DashboardPeriod struct {
+	Key   string
+	Label string
 }
 
 type MetricCount struct {
@@ -163,8 +171,30 @@ WHERE id = $1
 	return err
 }
 
-func (s *PostgresStore) DashboardMetrics(ctx context.Context) (DashboardMetrics, error) {
-	metrics := DashboardMetrics{GeneratedAt: time.Now().UTC()}
+func NormalizeDashboardPeriod(value string) DashboardPeriod {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "today", "hoje":
+		return DashboardPeriod{Key: "today", Label: "Hoje"}
+	case "24h":
+		return DashboardPeriod{Key: "24h", Label: "Últimas 24h"}
+	case "7d", "7":
+		return DashboardPeriod{Key: "7d", Label: "Últimos 7 dias"}
+	case "30d", "30":
+		return DashboardPeriod{Key: "30d", Label: "Últimos 30 dias"}
+	case "all", "tudo":
+		return DashboardPeriod{Key: "all", Label: "Tudo"}
+	default:
+		return DashboardPeriod{Key: "24h", Label: "Últimas 24h"}
+	}
+}
+
+func (s *PostgresStore) DashboardMetrics(ctx context.Context, period DashboardPeriod) (DashboardMetrics, error) {
+	period = NormalizeDashboardPeriod(period.Key)
+	metrics := DashboardMetrics{
+		GeneratedAt: time.Now().UTC(),
+		Period:      period.Key,
+		PeriodLabel: period.Label,
+	}
 
 	err := s.db.QueryRowContext(ctx, `
 SELECT
@@ -175,7 +205,8 @@ SELECT
 	count(*) FILTER (WHERE status = 'failed'),
 	count(*) FILTER (WHERE status = 'invalid_json')
 FROM webhook_events
-`).Scan(
+WHERE `+dashboardPeriodSQL("created_at")+`
+`, period.Key).Scan(
 		&metrics.TotalEvents,
 		&metrics.EventsToday,
 		&metrics.EventsLast24h,
@@ -193,9 +224,10 @@ FROM webhook_events
 	statusCounts, err := s.metricCounts(ctx, `
 SELECT status, count(*)
 FROM webhook_events
+WHERE `+dashboardPeriodSQL("created_at")+`
 GROUP BY status
 ORDER BY count(*) DESC, status ASC
-`)
+`, period.Key)
 	if err != nil {
 		return DashboardMetrics{}, err
 	}
@@ -204,21 +236,22 @@ ORDER BY count(*) DESC, status ASC
 	workflowCounts, err := s.metricCounts(ctx, `
 SELECT workflow, count(*)
 FROM webhook_events
+WHERE `+dashboardPeriodSQL("created_at")+`
 GROUP BY workflow
 ORDER BY count(*) DESC, workflow ASC
-`)
+`, period.Key)
 	if err != nil {
 		return DashboardMetrics{}, err
 	}
 	metrics.WorkflowCounts = workflowCounts
 
-	hourlyEvents, err := s.hourlyMetrics(ctx)
+	hourlyEvents, err := s.hourlyMetrics(ctx, period)
 	if err != nil {
 		return DashboardMetrics{}, err
 	}
 	metrics.HourlyEvents = hourlyEvents
 
-	recentEvents, err := s.recentEvents(ctx)
+	recentEvents, err := s.recentEvents(ctx, period)
 	if err != nil {
 		return DashboardMetrics{}, err
 	}
@@ -227,8 +260,8 @@ ORDER BY count(*) DESC, workflow ASC
 	return metrics, nil
 }
 
-func (s *PostgresStore) metricCounts(ctx context.Context, query string) ([]MetricCount, error) {
-	rows, err := s.db.QueryContext(ctx, query)
+func (s *PostgresStore) metricCounts(ctx context.Context, query string, args ...any) ([]MetricCount, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -245,14 +278,19 @@ func (s *PostgresStore) metricCounts(ctx context.Context, query string) ([]Metri
 	return counts, rows.Err()
 }
 
-func (s *PostgresStore) hourlyMetrics(ctx context.Context) ([]HourlyMetric, error) {
+func (s *PostgresStore) hourlyMetrics(ctx context.Context, period DashboardPeriod) ([]HourlyMetric, error) {
+	bucket := "hour"
+	if period.Key == "7d" || period.Key == "30d" || period.Key == "all" {
+		bucket = "day"
+	}
+
 	rows, err := s.db.QueryContext(ctx, `
-SELECT date_trunc('hour', created_at) AS hour, count(*)
+SELECT date_trunc($2, created_at) AS hour, count(*)
 FROM webhook_events
-WHERE created_at >= now() - interval '24 hours'
+WHERE `+dashboardPeriodSQL("created_at")+`
 GROUP BY hour
 ORDER BY hour ASC
-`)
+`, period.Key, bucket)
 	if err != nil {
 		return nil, err
 	}
@@ -269,13 +307,14 @@ ORDER BY hour ASC
 	return metrics, rows.Err()
 }
 
-func (s *PostgresStore) recentEvents(ctx context.Context) ([]WebhookEventSummary, error) {
+func (s *PostgresStore) recentEvents(ctx context.Context, period DashboardPeriod) ([]WebhookEventSummary, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, workflow, status, coalesce(http_status, 0), path, created_at, updated_at, coalesce(error_message, '')
 FROM webhook_events
+WHERE `+dashboardPeriodSQL("created_at")+`
 ORDER BY id DESC
 LIMIT 25
-`)
+`, period.Key)
 	if err != nil {
 		return nil, err
 	}
@@ -299,6 +338,16 @@ LIMIT 25
 		events = append(events, event)
 	}
 	return events, rows.Err()
+}
+
+func dashboardPeriodSQL(column string) string {
+	return `CASE $1
+	WHEN 'today' THEN ` + column + ` >= date_trunc('day', now())
+	WHEN '24h' THEN ` + column + ` >= now() - interval '24 hours'
+	WHEN '7d' THEN ` + column + ` >= now() - interval '7 days'
+	WHEN '30d' THEN ` + column + ` >= now() - interval '30 days'
+	ELSE true
+END`
 }
 
 func emptyStringToNil(value string) any {

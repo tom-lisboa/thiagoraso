@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"net/http"
+
+	"mentoria-automation-server/internal/storage"
 )
 
 func (api API) dashboard(w http.ResponseWriter, _ *http.Request) {
@@ -16,7 +18,8 @@ func (api API) metrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	metrics, err := api.eventStore.DashboardMetrics(r.Context())
+	period := storage.NormalizeDashboardPeriod(r.URL.Query().Get("period"))
+	metrics, err := api.eventStore.DashboardMetrics(r.Context(), period)
 	if err != nil {
 		api.logger.Error("failed to load dashboard metrics", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to load metrics")
@@ -88,6 +91,35 @@ const dashboardHTML = `<!doctype html>
       border-radius: 6px;
       font-weight: 650;
       cursor: pointer;
+    }
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .periods {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f7f9fc;
+    }
+    .period {
+      border: 0;
+      height: 28px;
+      padding: 0 9px;
+      background: transparent;
+      color: var(--muted);
+      border-radius: 5px;
+      font-size: 12px;
+    }
+    .period.active {
+      background: var(--info);
+      color: #fff;
     }
     main {
       padding: 24px 0 36px;
@@ -245,6 +277,7 @@ const dashboardHTML = `<!doctype html>
     @media (max-width: 640px) {
       .wrap { width: min(100vw - 20px, 1180px); }
       .topbar { align-items: flex-start; flex-direction: column; padding: 14px 0; }
+      .actions { justify-content: flex-start; }
       .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .value { font-size: 24px; }
       .bar-row { grid-template-columns: 88px minmax(0, 1fr) 38px; }
@@ -258,7 +291,16 @@ const dashboardHTML = `<!doctype html>
         <h1>Mentoria - Métricas</h1>
         <div class="subtitle" id="updated">Carregando dados...</div>
       </div>
-      <button id="refresh" type="button">Atualizar</button>
+      <div class="actions">
+        <div class="periods" aria-label="Filtro de período">
+          <button class="period" type="button" data-period="today">Hoje</button>
+          <button class="period" type="button" data-period="24h">24h</button>
+          <button class="period" type="button" data-period="7d">7 dias</button>
+          <button class="period" type="button" data-period="30d">30 dias</button>
+          <button class="period" type="button" data-period="all">Tudo</button>
+        </div>
+        <button id="refresh" type="button">Atualizar</button>
+      </div>
     </div>
   </header>
   <main class="wrap">
@@ -266,7 +308,7 @@ const dashboardHTML = `<!doctype html>
     <section class="grid layout">
       <div class="grid">
         <section class="panel">
-          <h2>Eventos nas últimas 24h</h2>
+          <h2 id="chart-title">Eventos por período</h2>
           <div class="panel-body">
             <div class="chart" id="hourly"></div>
           </div>
@@ -309,11 +351,16 @@ const dashboardHTML = `<!doctype html>
     const statusBars = document.querySelector("#status-bars");
     const workflowBars = document.querySelector("#workflow-bars");
     const hourly = document.querySelector("#hourly");
+    const chartTitle = document.querySelector("#chart-title");
     const refresh = document.querySelector("#refresh");
+    const periodButtons = Array.from(document.querySelectorAll(".period"));
+    const allowedPeriods = new Set(["today", "24h", "7d", "30d", "all"]);
+    let currentPeriod = new URLSearchParams(location.search).get("period") || "24h";
+    if (!allowedPeriods.has(currentPeriod)) currentPeriod = "24h";
 
     function metricsURL() {
-      if (location.pathname.startsWith("/mentoria/")) return "/mentoria/api/metrics";
-      return "/api/metrics";
+      const base = location.pathname.startsWith("/mentoria/") ? "/mentoria/api/metrics" : "/api/metrics";
+      return base + "?period=" + encodeURIComponent(currentPeriod);
     }
 
     function number(value) {
@@ -338,9 +385,9 @@ const dashboardHTML = `<!doctype html>
 
     function renderCards(data) {
       const items = [
-        ["Total", number(data.total_events), "Todos os eventos salvos", "info"],
-        ["Hoje", number(data.events_today), "Entradas no dia atual", "info"],
-        ["24h", number(data.events_last_24h), "Janela móvel", "info"],
+        ["Período", number(data.total_events), data.period_label || "Filtro atual", "info"],
+        ["Hoje", number(data.events_today), "Dentro do filtro", "info"],
+        ["24h", number(data.events_last_24h), "Dentro do filtro", "info"],
         ["Sucesso", number(data.successful), percent(data.success_rate), "ok"],
         ["Falhas", number(data.failed), "Workflow com erro", data.failed > 0 ? "bad" : "ok"],
         ["JSON inválido", number(data.invalid_json), "Payload malformado", data.invalid_json > 0 ? "warn" : "ok"]
@@ -373,8 +420,10 @@ const dashboardHTML = `<!doctype html>
     function renderHourly(rows) {
       const values = rows || [];
       const max = Math.max(...values.map(row => row.count), 1);
-      const padded = values.slice(-24);
-      while (padded.length < 24) padded.unshift({ count: 0 });
+      const columns = currentPeriod === "all" ? 30 : currentPeriod === "30d" ? 30 : currentPeriod === "7d" ? 7 : 24;
+      const padded = values.slice(-columns);
+      while (padded.length < columns) padded.unshift({ count: 0 });
+      hourly.style.gridTemplateColumns = "repeat(" + columns + ", minmax(4px, 1fr))";
       hourly.innerHTML = padded.map(row => {
         const height = Math.max(2, Math.round((row.count / max) * 140));
         return '<div class="column" style="height:' + height + 'px" title="' + dateTime(row.hour) + ' - ' + number(row.count) + ' eventos"></div>';
@@ -400,6 +449,9 @@ const dashboardHTML = `<!doctype html>
 
     async function load() {
       refresh.disabled = true;
+      periodButtons.forEach(button => {
+        button.classList.toggle("active", button.dataset.period === currentPeriod);
+      });
       try {
         const response = await fetch(metricsURL(), { cache: "no-store" });
         if (!response.ok) throw new Error("HTTP " + response.status);
@@ -409,7 +461,8 @@ const dashboardHTML = `<!doctype html>
         renderBars(workflowBars, data.workflow_counts);
         renderHourly(data.hourly_events);
         renderEvents(data.recent_events);
-        updated.textContent = "Atualizado em " + dateTime(data.generated_at);
+        chartTitle.textContent = currentPeriod === "7d" || currentPeriod === "30d" || currentPeriod === "all" ? "Eventos por dia" : "Eventos por hora";
+        updated.textContent = "Atualizado em " + dateTime(data.generated_at) + " · " + (data.period_label || "Filtro atual");
       } catch (error) {
         updated.textContent = "Falha ao carregar métricas";
         cards.innerHTML = '<div class="panel error">Não foi possível carregar as métricas: ' + error.message + '</div>';
@@ -418,6 +471,15 @@ const dashboardHTML = `<!doctype html>
       }
     }
 
+    periodButtons.forEach(button => {
+      button.addEventListener("click", () => {
+        currentPeriod = button.dataset.period;
+        const url = new URL(location.href);
+        url.searchParams.set("period", currentPeriod);
+        history.replaceState(null, "", url);
+        load();
+      });
+    });
     refresh.addEventListener("click", load);
     load();
   </script>
